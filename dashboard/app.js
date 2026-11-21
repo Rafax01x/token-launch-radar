@@ -1,12 +1,17 @@
-// Token Radar's dashboard: a dark radar board. It reads window.RADAR (written beside
+// Token Radar's dashboard v3: an achromatic ledger. It reads window.RADAR (written beside
 // dashboard/ by main.ts) and renders the ranked board, filters, a per-protocol detail view with
 // the model's own inputs and the protocol's farm plan. No network: every byte shown is in data.js.
 (function () {
   'use strict';
 
   var DATA = window.RADAR;
-  if (!DATA) return;
   var app = document.getElementById('board');
+  if (!DATA) {
+    app.innerHTML = '<div class="error"><h1>The board data did not load</h1>' +
+      '<p>The dashboard could not find its data file. Rebuild the output with main.ts and open the page again.</p></div>';
+    app.setAttribute('aria-busy', 'false');
+    return;
+  }
   var state = { q: '', category: 'all', chain: 'all', wl: false, tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
 
   function esc(s) {
@@ -162,32 +167,103 @@
       return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0;
     });
   }
-
   function sortBtn(key, label) {
     var arrow = state.sort === key ? (state.dir < 0 ? ' \u25bc' : ' \u25b2') : '';
     return '<button type="button" data-sort="' + key + '">' + esc(label) + esc(arrow) + '</button>';
   }
 
-  function headerHtml() {
-    return '<header class="top"><div class="brand"><span class="mark"></span><span>Token Radar</span></div>' +
-      '<div class="top-meta"><span>Snapshot ' + esc(DATA.as_of) + '</span><span>DefiLlama protocol index</span><span>' + esc(DATA.model_version) + ' model</span></div></header>';
+  // Total implied value per category, from the same rows the board shows.
+  function categoryTotals() {
+    var byCat = {};
+    DATA.rows.forEach(function (r) {
+      var c = r.category || 'Other';
+      if (!byCat[c]) byCat[c] = { total: 0, count: 0 };
+      byCat[c].total += r.implied_value_usd;
+      byCat[c].count += 1;
+    });
+    return Object.keys(byCat).map(function (c) {
+      return { category: c, total: byCat[c].total, count: byCat[c].count };
+    }).sort(function (a, b) { return b.total - a.total; });
+  }
+  function boardTotal() {
+    return DATA.rows.reduce(function (n, r) { return n + r.implied_value_usd; }, 0);
   }
 
-  function ledeHtml() {
-    var total = DATA.rows.reduce(function (n, r) { return n + r.implied_value_usd; }, 0);
+  function navHtml() {
+    var top5 = DATA.rows.slice(0, 5).map(function (r) {
+      return '<button class="nav-item" type="button" data-slug="' + esc(r.slug) + '"><span class="rank">' + r.rank + '</span><span class="nm">' + esc(r.name) + '</span></button>';
+    }).join('');
+    return '<aside class="nav" id="nav" aria-label="Sections">' +
+      '<div class="nav-brand"><span class="mark" aria-hidden="true">R</span><div><b>Token Radar</b><span>Token launch radar</span></div></div>' +
+      '<div class="nav-scope"><b>Snapshot ' + esc(DATA.as_of) + '</b><br>DefiLlama protocol index<br>' + esc(DATA.model_version) + ' model</div>' +
+      '<nav class="nav-group" aria-label="Board"><span>Board</span>' +
+      '<a class="nav-item" href="#top">Overview</a>' +
+      '<a class="nav-item" href="#board-table">The board</a>' +
+      '<button class="nav-item" type="button" data-nav-tab="live">Live tokens</button>' +
+      '<a class="nav-item" href="#model">How it is computed</a></nav>' +
+      '<nav class="nav-group" aria-label="Top 5 by implied value"><span>Top 5 by implied value</span>' + top5 + '</nav>' +
+      '<div class="nav-bottom">' +
+      '<button class="btn btn-block" type="button" id="nav-palette">Jump to a protocol <span class="kbd">Ctrl K</span></button>' +
+      '<button class="btn btn-primary btn-block" type="button" id="nav-insight">Review insight</button>' +
+      '<span class="hint">Board total ' + fmtUsd(boardTotal()) + ' implied</span></div>' +
+      '</aside>';
+  }
+
+  function titleHtml() {
     var top = DATA.rows[0];
-    return '<section class="lede"><p class="brief-label">AI Radar Brief</p>' +
-      '<div class="brief-head"><h1>' + DATA.watchlist_size + ' watchlist protocols, ranked by implied value</h1>' +
-      '<button class="btn-insight" type="button" id="insight-btn">Review insight</button></div>' +
-      '<p>The watchlist is the floor: every protocol with at least <b>$' + Math.round(DATA.floor_usd / 1e6) + 'M of TVL</b> that <b>records no token</b>. ' +
-      'The early radar adds <b>' + DATA.early_size + ' pre-token protocols</b> the watchlist leaves out, by TVL. ' +
-      'Implied value is a model, not a promise: it says what a token would be worth if the protocol\u2019s record stayed as it is.</p>' +
-      '<div class="facts">' +
-      '<div class="fact"><span>Watchlist covered</span><b>' + DATA.watchlist_size + ' / ' + DATA.watchlist_size + '</b></div>' +
-      '<div class="fact"><span>Pre-token rows scored</span><b>' + DATA.board_size + '</b></div>' +
-      '<div class="fact hero"><span>Top implied value</span><b>' + fmtUsd(top ? top.implied_value_usd : 0) + '</b></div>' +
-      '<div class="fact"><span>Board total implied</span><b>' + fmtUsd(total) + '</b></div>' +
-      '</div></section>';
+    return '<section class="title" id="top"><h1>Token Launch Radar</h1>' +
+      '<p class="finding">' + (top ? '<b>' + esc(top.name) + '</b> leads the board at <b>' + fmtUsd(top.implied_value_usd) + '</b> implied, from ' + fmtUsd(top.tvl_usd) + ' of TVL with no token on record.' : 'No rows scored.') + '</p>' +
+      '<p class="scope-line">' + DATA.board_size + ' pre-token rows hold ' + fmtUsd(boardTotal()) + ' implied in total. ' +
+      'The watchlist is the floor: every protocol with at least <b>$' + Math.round(DATA.floor_usd / 1e6) + 'M of TVL</b> that records no token, plus ' + DATA.early_size + ' more the watchlist leaves out, by TVL.</p></section>';
+  }
+
+  function tabsHtml() {
+    return '<div class="tabs-row" role="group" aria-label="Token status">' +
+      '<button type="button" data-tab="pre-token" aria-pressed="' + (state.tab === 'pre-token') + '">Pre-token</button>' +
+      '<button type="button" data-tab="live" aria-pressed="' + (state.tab === 'live') + '">Live token</button>' +
+      '</div>';
+  }
+
+  function stepParts(s) {
+    var at = s.indexOf(' Cost: ');
+    if (at < 0) return { action: s, tail: '' };
+    return { action: s.slice(0, at), tail: s.slice(at + 1) };
+  }
+
+  function topPickHtml() {
+    var top = DATA.rows[0];
+    if (!top) return '';
+    var gclass = top.change_7d === null ? '' : top.change_7d >= 0 ? 'pos' : 'neg';
+    var firstMoves = farmSteps(top).slice(0, 2).map(function (s) {
+      var p = stepParts(s);
+      return '<li><b>' + esc(p.action) + '</b><span class="cost">' + esc(p.tail) + '</span></li>';
+    }).join('');
+    return '<section class="card" aria-label="Top pick"><p class="pick-label">Top pick</p>' +
+      '<h2 class="pick-name">' + esc(top.name) + '</h2>' +
+      '<p class="pick-sub">' + esc(top.category || 'Other') + ' on ' + esc((top.chains || []).slice(0, 3).join(', ') || 'an unnamed chain') + '</p>' +
+      '<p class="pick-value">' + fmtUsd(top.implied_value_usd) + '</p>' +
+      '<div class="pick-facts">' +
+      '<div><span>TVL</span><b>' + fmtUsd(top.tvl_usd) + '</b></div>' +
+      '<div><span>7d growth</span><b class="' + gclass + '">' + fmtPct(top.change_7d) + '</b></div>' +
+      '<div><span>Age, no token</span><b>' + fmtAge(top.age_days) + '</b></div>' +
+      '</div>' +
+      '<div class="pick-steps"><p class="pick-label">First moves</p><ol>' + firstMoves + '</ol></div>' +
+      '<button class="btn" type="button" data-slug="' + esc(top.slug) + '">Open its farm plan</button></section>';
+  }
+
+  function categoryBarsHtml() {
+    var cats = categoryTotals();
+    var shown = cats.slice(0, 6);
+    var max = shown.length ? shown[0].total : 1;
+    var rows = shown.map(function (c) {
+      return '<div class="cat-row"><div class="cat-top"><span class="cat-name">' + esc(c.category) + '</span><span class="cat-val">' + fmtUsd(c.total) + '</span></div>' +
+        '<div class="cat-bar" aria-hidden="true"><i style="width:' + Math.max(3, Math.round((c.total / max) * 100)) + '%"></i></div>' +
+        '<div class="cat-count">' + c.count + ' protocol' + (c.count === 1 ? '' : 's') + '</div></div>';
+    }).join('');
+    return '<section class="card" aria-label="Where the implied value sits"><h2>Where the implied value sits</h2>' +
+      '<p class="card-sub">Total implied value by category, from the ' + DATA.board_size + ' pre-token rows.</p>' +
+      rows +
+      '<p class="card-foot">Showing ' + shown.length + ' of ' + cats.length + ' categories.</p></section>';
   }
 
   function controlsHtml() {
@@ -198,15 +274,11 @@
         list.map(function (c) { return '<option value="' + esc(c) + '"' + (cur === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
     };
     return '<div class="controls">' +
-      '<div class="field"><label for="q">Search</label><input type="search" id="q" placeholder="Search name, category or chain" value="' + esc(state.q) + '" aria-label="Search the board"></div>' +
+      '<div class="field"><label for="q">Search</label><div class="search-hint"><input type="search" id="q" placeholder="Search name, category, chain" value="' + esc(state.q) + '" aria-label="Search the board"><span class="kbd" aria-hidden="true">/</span></div></div>' +
       '<div class="field"><label for="category">Category</label><select id="category" aria-label="Filter by category">' + opts(cats, state.category, 'All categories') + '</select></div>' +
       '<div class="field"><label for="chain">Chain</label><select id="chain" aria-label="Filter by chain">' + opts(chains, state.chain, 'All chains') + '</select></div>' +
       '<label class="check"><input type="checkbox" id="wl"' + (state.wl ? ' checked' : '') + '> Watchlist only</label>' +
-      '<div class="field"><span class="sub">Token status</span><div class="tabs">' +
-      '<button type="button" data-tab="pre-token" aria-pressed="' + (state.tab === 'pre-token') + '">Pre-token</button>' +
-      '<button type="button" data-tab="live" aria-pressed="' + (state.tab === 'live') + '">Live token</button>' +
-      '</div></div>' +
-      '<span class="count sub">' + (state.tab === 'pre-token' ? filteredRows().length + ' rows shown' : DATA.live.length + ' live-token protocols') + '</span>' +
+      '<span class="count sub" id="row-count">' + (state.tab === 'pre-token' ? filteredRows().length + ' rows shown' : DATA.live.length + ' live-token protocols') + '</span>' +
       '</div>';
   }
 
@@ -215,7 +287,7 @@
     if (list.length === 0) {
       return '<div class="panel"><div class="empty"><h2>No protocol matches that filter</h2>' +
         '<p>Clear the search or pick another category to see the board again.</p>' +
-        '<button class="button" type="button" id="clear-filters">Clear filters</button></div></div>';
+        '<button class="btn btn-primary" type="button" id="clear-filters">Clear filters</button></div></div>';
     }
     var max = list[0].implied_value_usd || 1;
     var rows = list.map(function (r) {
@@ -233,7 +305,7 @@
     }).join('');
     return '<div class="panel"><div class="table-wrap"><table>' +
       '<caption>Pre-token protocols, strongest implied value first. Select a row for its model and farm plan.</caption>' +
-      '<thead><tr><th scope="col">' + sortBtn('implied', 'Rank') + '</th><th scope="col">' + sortBtn('name', 'Protocol') + '</th><th scope="col">' + sortBtn('tvl', 'TVL') + '</th><th scope="col">' + sortBtn('growth', '7d') + '</th><th scope="col">' + sortBtn('age', 'Age') + '</th><th scope="col">' + sortBtn('implied', 'Implied value') + '</th><th scope="col">Token</th></tr></thead>' +
+      '<thead><tr><th scope="col" class="num">' + sortBtn('implied', 'Rank') + '</th><th scope="col">' + sortBtn('name', 'Protocol') + '</th><th scope="col" class="num">' + sortBtn('tvl', 'TVL') + '</th><th scope="col" class="num">' + sortBtn('growth', '7d') + '</th><th scope="col" class="num">' + sortBtn('age', 'Age') + '</th><th scope="col" class="num">' + sortBtn('implied', 'Implied value') + '</th><th scope="col">Token</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table></div></div>';
   }
 
@@ -248,16 +320,16 @@
     }).join('');
     return '<div class="panel"><div class="table-wrap"><table>' +
       '<caption>Token live: these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking.</caption>' +
-      '<thead><tr><th scope="col">Status</th><th scope="col">Protocol</th><th scope="col">TVL</th><th scope="col">7d</th><th scope="col">Market cap</th><th scope="col">Token</th></tr></thead>' +
+      '<thead><tr><th scope="col">Status</th><th scope="col">Protocol</th><th scope="col" class="num">TVL</th><th scope="col" class="num">7d</th><th scope="col" class="num">Market cap</th><th scope="col">Token</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table></div></div>';
   }
 
   function modelPanelHtml() {
     var m = DATA.model;
-    return '<section class="panel model"><h2>How implied value is computed</h2>' +
+    return '<section class="panel model" id="model"><h2>How implied value is computed</h2>' +
       '<p class="sub">Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.</p>' +
       '<div class="formula">implied = round( tvl_usd &times; category_multiple &times; (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 &times; ' + m.growth_weight + ') &times; (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' &times; ' + m.maturity_range + ') &times; (1 + min(chains &minus; 1, ' + m.breadth_cap + ') &times; ' + m.breadth_step + ') )</div>' +
-      '<table class="tiers"><thead><tr><th scope="col">What the protocol does</th><th scope="col">Category multiple</th><th scope="col">Why</th></tr></thead><tbody>' +
+      '<table class="tiers"><thead><tr><th scope="col">What the protocol does</th><th scope="col" class="num">Category multiple</th><th scope="col">Why</th></tr></thead><tbody>' +
       '<tr><td>Trading venues (DEX, derivatives, perps, prediction)</td><td class="num">0.45</td><td>Take a cut of every trade</td></tr>' +
       '<tr><td>Lending &amp; borrowing (lending, CDP, collateral)</td><td class="num">0.35</td><td>Take a spread on every loan</td></tr>' +
       '<tr><td>Yield &amp; vaults (yield, curators, allocators)</td><td class="num">0.30</td><td>Take a performance fee</td></tr>' +
@@ -279,13 +351,22 @@
   insight.id = 'insight';
   insight.setAttribute('aria-labelledby', 'insight-title');
 
+  var palette = document.createElement('dialog');
+  palette.className = 'palette';
+  palette.id = 'palette';
+  palette.setAttribute('aria-label', 'Jump to a protocol');
+  palette.innerHTML = '<input type="search" id="pal-q" placeholder="Type a protocol name" aria-label="Jump to a protocol" autocomplete="off">' +
+    '<div class="pal-list" id="pal-list" role="listbox" aria-label="Matching protocols"></div>' +
+    '<div class="pal-foot">Up and Down to move &middot; Enter to open &middot; Esc to close</div>';
+  var palState = { q: '', active: 0, results: [] };
+
   function openInsight() {
     var top = DATA.rows.slice(0, 4);
     var rows = top.map(function (r, i) {
       return '<button class="insight-row" type="button" data-slug="' + esc(r.slug) + '"><span class="rank">#' + (i + 1) + '</span><span class="nm">' + esc(r.name) + '</span><span class="val">' + fmtUsd(r.implied_value_usd) + '</span></button>';
     }).join('');
     insight.innerHTML =
-      '<div class="detail-head"><div><span class="sub">AI Radar Brief</span>' +
+      '<div class="detail-head"><div>' +
       '<h2 id="insight-title">Review insight</h2>' +
       '<p class="sub">Four highest-implied-value protocols on this board, from the sealed snapshot.</p></div>' +
       '<button class="close" type="button" aria-label="Close insight">Close</button></div>' +
@@ -312,10 +393,8 @@
     var recomputed = impliedOf(row, DATA.model);
     var match = recomputed === row.implied_value_usd;
     var stepItems = steps.map(function (s) {
-      var at = s.indexOf(' Cost: ');
-      var action = at >= 0 ? s.slice(0, at) : s;
-      var tail = at >= 0 ? s.slice(at + 1) : '';
-      return '<li><b>' + esc(action) + '</b><span class="cost">' + esc(tail) + '</span></li>';
+      var p = stepParts(s);
+      return '<li><b>' + esc(p.action) + '</b><span class="cost">' + esc(p.tail) + '</span></li>';
     }).join('');
     dialog.innerHTML =
       '<div class="detail-head"><div><span class="sub">Rank ' + row.rank + ' of ' + DATA.board_size + (row.on_watchlist ? ' &middot; watchlist' : ' &middot; early radar') + '</span>' +
@@ -344,24 +423,60 @@
     }
   }
 
-  function render() {
-    app.innerHTML = '<div class="shell">' + headerHtml() + ledeHtml() + controlsHtml() +
-      (state.tab === 'pre-token' ? boardTableHtml() : liveTableHtml()) +
-      (state.tab === 'pre-token' ? modelPanelHtml() : '') + '</div>';
-    app.setAttribute('aria-busy', 'false');
-    if (!dialog.isConnected) app.appendChild(dialog);
-    if (!insight.isConnected) app.appendChild(insight);
+  function paletteResults(q) {
+    var needle = q.trim().toLowerCase();
+    var list = DATA.rows.filter(function (r) {
+      if (!needle) return true;
+      var hay = [r.name, r.slug, r.category, (r.chains || []).join(' ')].join(' ').toLowerCase();
+      return hay.indexOf(needle) >= 0;
+    });
+    return list.slice(0, 8);
+  }
+  function renderPalette() {
+    var list = document.getElementById('pal-list');
+    if (!list) return;
+    palState.results = paletteResults(palState.q);
+    if (palState.active >= palState.results.length) palState.active = Math.max(0, palState.results.length - 1);
+    if (palState.results.length === 0) {
+      list.innerHTML = '<div class="pal-empty">No protocol matches that name.</div>';
+      return;
+    }
+    list.innerHTML = palState.results.map(function (r, i) {
+      return '<button class="pal-row' + (i === palState.active ? ' active' : '') + '" type="button" role="option" aria-selected="' + (i === palState.active) + '" data-slug="' + esc(r.slug) + '">' +
+        '<span class="rank">#' + r.rank + '</span><span class="nm">' + esc(r.name) + '</span><span class="cat">' + esc(r.category || 'Other') + '</span><span class="val">' + fmtUsd(r.implied_value_usd) + '</span></button>';
+    }).join('');
+    Array.prototype.forEach.call(list.querySelectorAll('.pal-row'), function (b, i) {
+      b.addEventListener('click', function () { palette.close(); openDetail(b.getAttribute('data-slug')); });
+      b.addEventListener('mousemove', function () { palState.active = i; renderPalette(); });
+    });
+  }
+  function openPalette() {
+    closeNav();
+    palState.q = '';
+    palState.active = 0;
+    renderPalette();
+    var input = document.getElementById('pal-q');
+    if (input) input.value = '';
+    if (typeof palette.showModal === 'function') {
+      if (!palette.open) palette.showModal();
+    } else {
+      palette.setAttribute('open', '');
+    }
+    if (input) input.focus();
+  }
 
-    var ib = document.getElementById('insight-btn');
-    if (ib) ib.addEventListener('click', openInsight);
-    var q = document.getElementById('q');
-    if (q) q.addEventListener('input', function () { state.q = q.value; writeHash(); render(); });
-    var cat = document.getElementById('category');
-    if (cat) cat.addEventListener('change', function () { state.category = cat.value; writeHash(); render(); });
-    var ch = document.getElementById('chain');
-    if (ch) ch.addEventListener('change', function () { state.chain = ch.value; writeHash(); render(); });
-    var wl = document.getElementById('wl');
-    if (wl) wl.addEventListener('change', function () { state.wl = wl.checked; writeHash(); render(); });
+  function closeNav() { document.body.classList.remove('nav-open'); }
+
+  // Refresh only the table and the row count, so typing in the search box keeps focus.
+  function updateTable() {
+    var wrap = document.getElementById('board-table');
+    if (!wrap) return;
+    wrap.innerHTML = state.tab === 'pre-token' ? boardTableHtml() : liveTableHtml();
+    var count = document.getElementById('row-count');
+    if (count) count.textContent = state.tab === 'pre-token' ? filteredRows().length + ' rows shown' : DATA.live.length + ' live-token protocols';
+    wireTableRows();
+  }
+  function wireTableRows() {
     var clear = document.getElementById('clear-filters');
     if (clear) clear.addEventListener('click', function () { state.q = ''; state.category = 'all'; state.chain = 'all'; state.wl = false; writeHash(); render(); });
     Array.prototype.forEach.call(app.querySelectorAll('[data-sort]'), function (btn) {
@@ -369,11 +484,8 @@
         var key = btn.getAttribute('data-sort');
         if (state.sort === key) state.dir = -state.dir;
         else { state.sort = key; state.dir = -1; }
-        render();
+        updateTable();
       });
-    });
-    Array.prototype.forEach.call(app.querySelectorAll('[data-tab]'), function (btn) {
-      btn.addEventListener('click', function () { state.tab = btn.getAttribute('data-tab'); writeHash(); render(); });
     });
     Array.prototype.forEach.call(app.querySelectorAll('tbody tr[data-slug]'), function (tr) {
       tr.addEventListener('click', function () { openDetail(tr.getAttribute('data-slug')); });
@@ -381,12 +493,94 @@
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(tr.getAttribute('data-slug')); }
       });
     });
+  }
+
+  function render() {
+    var isLive = state.tab === 'live';
+    app.innerHTML = '<div class="app">' +
+      '<div class="topbar"><button class="menu-btn" type="button" id="menu-btn" aria-label="Open navigation" aria-expanded="false">Menu</button><b>Token Radar</b></div>' +
+      '<div class="scrim" id="scrim" aria-hidden="true"></div>' +
+      navHtml() +
+      '<div class="main">' + titleHtml() + tabsHtml() +
+      (isLive ? '' : '<div class="duo">' + topPickHtml() + categoryBarsHtml() + '</div>') +
+      '<h2 class="section-title">' + (isLive ? 'Live tokens' : 'The board') + '</h2>' +
+      '<p class="section-sub">' + (isLive ? 'Protocols that already trade, set aside from the pre-token ranking.' : 'Pre-token protocols, strongest implied value first. Select a row for its model and farm plan.') + '</p>' +
+      controlsHtml() +
+      '<div id="board-table">' + (isLive ? liveTableHtml() : boardTableHtml()) + '</div>' +
+      (isLive ? '' : modelPanelHtml()) +
+      '</div></div>';
+    app.setAttribute('aria-busy', 'false');
+    if (!dialog.isConnected) app.appendChild(dialog);
+    if (!insight.isConnected) app.appendChild(insight);
+    if (!palette.isConnected) app.appendChild(palette);
+
+    var menuBtn = document.getElementById('menu-btn');
+    if (menuBtn) menuBtn.addEventListener('click', function () {
+      var open = document.body.classList.toggle('nav-open');
+      menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    var scrim = document.getElementById('scrim');
+    if (scrim) scrim.addEventListener('click', closeNav);
+    var navInsight = document.getElementById('nav-insight');
+    if (navInsight) navInsight.addEventListener('click', function () { closeNav(); openInsight(); });
+    var navPalette = document.getElementById('nav-palette');
+    if (navPalette) navPalette.addEventListener('click', openPalette);
+    Array.prototype.forEach.call(app.querySelectorAll('.nav-item[href]'), function (a) {
+      a.addEventListener('click', closeNav);
+    });
+    Array.prototype.forEach.call(app.querySelectorAll('[data-nav-tab]'), function (btn) {
+      btn.addEventListener('click', function () {
+        closeNav();
+        state.tab = btn.getAttribute('data-nav-tab');
+        writeHash();
+        render();
+        var t = document.getElementById('board-table');
+        if (t) t.scrollIntoView();
+      });
+    });
+    Array.prototype.forEach.call(app.querySelectorAll('[data-tab]'), function (btn) {
+      btn.addEventListener('click', function () { state.tab = btn.getAttribute('data-tab'); writeHash(); render(); });
+    });
+    Array.prototype.forEach.call(app.querySelectorAll('[data-slug]'), function (el) {
+      if (el.tagName === 'BUTTON' && !el.classList.contains('pal-row')) {
+        el.addEventListener('click', function () { closeNav(); openDetail(el.getAttribute('data-slug')); });
+      }
+    });
+    var q = document.getElementById('q');
+    if (q) q.addEventListener('input', function () { state.q = q.value; writeHash(); updateTable(); });
+    var cat = document.getElementById('category');
+    if (cat) cat.addEventListener('change', function () { state.category = cat.value; writeHash(); render(); });
+    var ch = document.getElementById('chain');
+    if (ch) ch.addEventListener('change', function () { state.chain = ch.value; writeHash(); render(); });
+    var wl = document.getElementById('wl');
+    if (wl) wl.addEventListener('change', function () { state.wl = wl.checked; writeHash(); render(); });
+    wireTableRows();
     if (state.selected) openDetail(state.selected);
   }
+
+  var palInput = palette.querySelector('#pal-q');
+  palInput.addEventListener('input', function () { palState.q = palInput.value; palState.active = 0; renderPalette(); });
+  palInput.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (palState.active < palState.results.length - 1) { palState.active += 1; renderPalette(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (palState.active > 0) { palState.active -= 1; renderPalette(); } }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      var r = palState.results[palState.active];
+      if (r) { palette.close(); openDetail(r.slug); }
+    }
+  });
 
   readHash();
   render();
   window.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && dialog.open) dialog.close();
+    var tag = (e.target && e.target.tagName) || '';
+    var typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
+    else if (e.key === '/' && !typing) {
+      e.preventDefault();
+      var q = document.getElementById('q');
+      if (q) q.focus();
+    }
   });
 })();
