@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Token Radar favicon</title>
+  <polygon points="128,28 214.6,78 214.6,178 128,228 41.4,178 41.4,78" fill="none" stroke="#2FD6A3" stroke-width="28" stroke-linejoin="round"/>
+  <line x1="128" y1="128" x2="199" y2="57" stroke="#2FD6A3" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="199" cy="57" r="18" fill="#2FD6A3"/>
+</svg>
