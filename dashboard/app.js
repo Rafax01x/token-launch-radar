@@ -176,14 +176,16 @@
   function ledeHtml() {
     var total = DATA.rows.reduce(function (n, r) { return n + r.implied_value_usd; }, 0);
     var top = DATA.rows[0];
-    return '<section class="lede"><div><h1>' + DATA.watchlist_size + ' watchlist protocols, ranked by implied value</h1>' +
+    return '<section class="lede"><p class="brief-label">AI Radar Brief</p>' +
+      '<div class="brief-head"><h1>' + DATA.watchlist_size + ' watchlist protocols, ranked by implied value</h1>' +
+      '<button class="btn-insight" type="button" id="insight-btn">Review insight</button></div>' +
       '<p>The watchlist is the floor: every protocol with at least <b>$' + Math.round(DATA.floor_usd / 1e6) + 'M of TVL</b> that <b>records no token</b>. ' +
       'The early radar adds <b>' + DATA.early_size + ' pre-token protocols</b> the watchlist leaves out, by TVL. ' +
-      'Implied value is a model, not a promise: it says what a token would be worth if the protocol\u2019s record stayed as it is.</p></div>' +
+      'Implied value is a model, not a promise: it says what a token would be worth if the protocol\u2019s record stayed as it is.</p>' +
       '<div class="facts">' +
       '<div class="fact"><span>Watchlist covered</span><b>' + DATA.watchlist_size + ' / ' + DATA.watchlist_size + '</b></div>' +
       '<div class="fact"><span>Pre-token rows scored</span><b>' + DATA.board_size + '</b></div>' +
-      '<div class="fact"><span>Top implied value</span><b>' + fmtUsd(top ? top.implied_value_usd : 0) + '</b></div>' +
+      '<div class="fact hero"><span>Top implied value</span><b>' + fmtUsd(top ? top.implied_value_usd : 0) + '</b></div>' +
       '<div class="fact"><span>Board total implied</span><b>' + fmtUsd(total) + '</b></div>' +
       '</div></section>';
   }
@@ -272,6 +274,34 @@
   dialog.setAttribute('aria-labelledby', 'detail-title');
   dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
 
+  var insight = document.createElement('dialog');
+  insight.className = 'detail';
+  insight.id = 'insight';
+  insight.setAttribute('aria-labelledby', 'insight-title');
+
+  function openInsight() {
+    var top = DATA.rows.slice(0, 4);
+    var rows = top.map(function (r, i) {
+      return '<button class="insight-row" type="button" data-slug="' + esc(r.slug) + '"><span class="rank">#' + (i + 1) + '</span><span class="nm">' + esc(r.name) + '</span><span class="val">' + fmtUsd(r.implied_value_usd) + '</span></button>';
+    }).join('');
+    insight.innerHTML =
+      '<div class="detail-head"><div><span class="sub">AI Radar Brief</span>' +
+      '<h2 id="insight-title">Review insight</h2>' +
+      '<p class="sub">Four highest-implied-value protocols on this board, from the sealed snapshot.</p></div>' +
+      '<button class="close" type="button" aria-label="Close insight">Close</button></div>' +
+      '<section class="detail-section"><div>' + rows + '</div>' +
+      '<p class="note">Select a row to open its model breakdown and farm plan. Values are the entry\u2019s own implied-value claim, recomputed from the snapshot figures. No launch is predicted.</p></section>';
+    insight.querySelector('.close').addEventListener('click', function () { insight.close(); });
+    Array.prototype.forEach.call(insight.querySelectorAll('.insight-row'), function (b) {
+      b.addEventListener('click', function () { insight.close(); openDetail(b.getAttribute('data-slug')); });
+    });
+    if (typeof insight.showModal === 'function') {
+      if (!insight.open) insight.showModal();
+    } else {
+      insight.setAttribute('open', '');
+    }
+  }
+
   function openDetail(slug) {
     var row = null;
     DATA.rows.forEach(function (r) { if (r.slug === slug) row = r; });
@@ -320,7 +350,10 @@
       (state.tab === 'pre-token' ? modelPanelHtml() : '') + '</div>';
     app.setAttribute('aria-busy', 'false');
     if (!dialog.isConnected) app.appendChild(dialog);
+    if (!insight.isConnected) app.appendChild(insight);
 
+    var ib = document.getElementById('insight-btn');
+    if (ib) ib.addEventListener('click', openInsight);
     var q = document.getElementById('q');
     if (q) q.addEventListener('input', function () { state.q = q.value; writeHash(); render(); });
     var cat = document.getElementById('category');
